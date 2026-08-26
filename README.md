@@ -43,8 +43,9 @@ Shortcuts (`Ctrl` on Windows, `Cmd` on Mac): `O` open · `S` save · `Z` undo ·
 ## Running from source
 
 ```
-pip install pymupdf pymupdf-fonts pillow
-python app.py            # any platform
+# Windows                                # macOS / Linux
+pip install pymupdf pymupdf-fonts pillow  pip3 install pymupdf pymupdf-fonts pillow
+python app.py                             python3 app.py
 ```
 
 Windows keeps a `NiccoPDF.bat` launcher on the `main` branch; the `macos`

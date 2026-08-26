@@ -63,8 +63,9 @@ def _fatal_box(title: str, msg: str) -> None:
             import subprocess
             subprocess.run(
                 ["osascript", "-e",
-                 f"display dialog {_json.dumps(msg)} with title "
-                 f"{_json.dumps(title)} buttons {{\"OK\"}} default button 1"],
+                 f"display dialog {_json.dumps(msg, ensure_ascii=False)} with title "
+                 f"{_json.dumps(title, ensure_ascii=False)} buttons {{\"OK\"}} "
+                 "default button 1"],
                 timeout=120, check=False)
         else:
             raise OSError("no native dialog")
@@ -90,6 +91,8 @@ except Exception:
 COLORS = {"Black": "#000000", "Blue": "#1a3faa", "Red": "#c00000"}
 MIN_ZOOM, MAX_ZOOM = 0.08, 6.0
 HANDLE = 9  # px, selection handle square size
+MOD = "Cmd" if IS_MAC else "Ctrl"
+DEL_KEY = "Delete" if IS_MAC else "Del"
 
 
 def hex_to_rgb01(h: str) -> tuple[float, float, float]:
@@ -166,6 +169,12 @@ class App:
         self._build_ui()
         self._bind_keys()
         root.protocol("WM_DELETE_WINDOW", self.on_close)
+        if IS_MAC:
+            # Cmd-Q / Dock-Quit / logout otherwise bypass on_close entirely
+            try:
+                root.createcommand("::tk::mac::Quit", self.on_close)
+            except Exception:
+                pass
         root.report_callback_exception = self._tk_error
 
     # ------------------------------------------------------------- config
@@ -385,9 +394,11 @@ class App:
         path = filedialog.askopenfilename(
             parent=self.root, title="Open PDF or image",
             initialdir=self.conf.get("last_dir", os.path.expanduser("~")),
+            # tuple-of-patterns is the portable form (';'-strings are Windows-only)
             filetypes=[("PDF and images",
-                        "*.pdf;*.png;*.jpg;*.jpeg;*.gif;*.bmp;*.tif;*.tiff;*.webp"),
-                       ("All files", "*.*")])
+                        ("*.pdf", "*.png", "*.jpg", "*.jpeg", "*.gif",
+                         "*.bmp", "*.tif", "*.tiff", "*.webp")),
+                       ("All files", "*")])
         if path:
             self.open_file(path)
 
@@ -528,8 +539,9 @@ class App:
         path = filedialog.askopenfilename(
             parent=self.root, title="Choose signature / image",
             initialdir=self.conf.get("last_img_dir", self.conf.get("last_dir", "")),
-            filetypes=[("Images", "*.png;*.jpg;*.jpeg;*.gif;*.bmp;*.tif;*.tiff;*.webp"),
-                       ("All files", "*.*")])
+            filetypes=[("Images", ("*.png", "*.jpg", "*.jpeg", "*.gif",
+                                   "*.bmp", "*.tif", "*.tiff", "*.webp")),
+                       ("All files", "*")])
         if not path:
             return
         self.conf["last_img_dir"] = os.path.dirname(path)
@@ -581,7 +593,8 @@ class App:
         self._set_cursor("")
         self._mark_dirty()
         self.redraw()
-        self.set_status("Drag to move; drag a corner to resize; Del deletes; Ctrl+Z undoes.")
+        self.set_status(f"Drag to move; drag a corner to resize; {DEL_KEY} "
+                        f"deletes; {MOD}+Z undoes.")
 
     # ------------------------------------------------------------- editing text
     def _open_editor(self, x_pt: float, y_pt: float, initial: str = "",
@@ -602,8 +615,11 @@ class App:
         txt.focus_set()
         txt.bind("<Escape>", lambda e: self._cancel_editor())
         txt.bind("<Control-Return>", lambda e: (self._commit_editor(), "break")[1])
+        if IS_MAC:
+            txt.bind("<Command-Return>", lambda e: (self._commit_editor(), "break")[1])
         txt.bind("<FocusOut>", lambda e: self._commit_editor())
-        self.set_status("Type your text.  Enter = new line · Ctrl+Enter or click away = done · Esc = cancel")
+        self.set_status(f"Type your text.  Enter = new line · {MOD}+Enter or "
+                        "click away = done · Esc = cancel")
 
     def _commit_editor(self) -> None:
         ed = self.editing
