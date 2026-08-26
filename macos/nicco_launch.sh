@@ -22,7 +22,8 @@ note() {
   /usr/bin/osascript -e "display notification \"$1\" with title \"NiccoPDF\"" >/dev/null 2>&1 || true
 }
 
-has_tk()   { "$1" -c 'import tkinter' >/dev/null 2>&1; }
+# usable python: has Tk and is 3.9+ (older can't install our components)
+has_tk()   { "$1" -c 'import sys, tkinter; sys.exit(0 if sys.version_info >= (3, 9) else 1)' >/dev/null 2>&1; }
 has_deps() { "$1" -c 'import pymupdf, PIL' >/dev/null 2>&1; }
 
 if [ ! -f "$APP_DIR/app.py" ]; then
@@ -45,6 +46,12 @@ if [ -z "$PY" ]; then
   for cand in /Library/Frameworks/Python.framework/Versions/*/bin/python3 \
               /opt/homebrew/bin/python3 /usr/local/bin/python3 /usr/bin/python3; do
     [ -x "$cand" ] || continue
+    # /usr/bin/python3 is Apple's stub when the developer tools are absent;
+    # merely running it would pop the system "install the command line
+    # developer tools" dialog — skip it unless real tools are installed
+    if [ "$cand" = /usr/bin/python3 ] && ! /usr/bin/xcode-select -p >/dev/null 2>&1; then
+      continue
+    fi
     if has_tk "$cand"; then BASE="$cand"; break; fi
   done
   if [ -z "$BASE" ]; then
@@ -58,20 +65,22 @@ if [ -z "$PY" ]; then
   if has_deps "$BASE"; then
     PY="$BASE"
   else
-    # one-time component install into a private venv
+    # (re)build the private venv from scratch — an old venv whose base
+    # Python was upgraded or removed would otherwise fail forever
     note "First-run setup: installing components (about a minute)…"
     log "creating venv at $VENV"
-    if ! "$BASE" -m venv "$VENV" >>"$LOG" 2>&1; then
-      dialog "Setup failed while creating a Python environment. Details: $LOG"
+    rm -rf "$VENV"
+    if ! "$BASE" -m venv --clear "$VENV" >>"$LOG" 2>&1; then
+      dialog "Setup failed while creating a Python environment. Try deleting the folder $VENV and opening NiccoPDF again. Details: $LOG"
       exit 1
     fi
     "$VENV/bin/python3" -m pip install --upgrade pip >>"$LOG" 2>&1 || true
     if ! "$VENV/bin/python3" -m pip install pymupdf pymupdf-fonts pillow >>"$LOG" 2>&1; then
-      dialog "Setup failed while installing components (is the internet reachable?). Details: $LOG"
+      dialog "Setup failed while installing components (is the internet reachable?). Try deleting the folder $VENV and opening NiccoPDF again. Details: $LOG"
       exit 1
     fi
     if ! has_deps "$VENV/bin/python3"; then
-      dialog "Setup finished but the components did not load. Details: $LOG"
+      dialog "Setup finished but the components did not load. Try deleting the folder $VENV and opening NiccoPDF again. Details: $LOG"
       exit 1
     fi
     PY="$VENV/bin/python3"

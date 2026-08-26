@@ -91,8 +91,11 @@ def build_mac_zip(app: str) -> str:
     exec_suffixes = ("Contents/MacOS/NiccoPDF", "nicco_launch.sh")
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.writestr(_zi("READ ME FIRST.txt"), MAC_NOTES)
-        for base, _dirs, files in os.walk(app):
+        for base, dirs, files in os.walk(app):
+            dirs[:] = [d for d in dirs if d != "__pycache__"]
             for f in files:
+                if f.endswith(".pyc"):
+                    continue
                 full = os.path.join(base, f)
                 rel = os.path.relpath(full, DIST).replace(os.sep, "/")
                 is_exec = any(rel.endswith(sfx) for sfx in exec_suffixes)
