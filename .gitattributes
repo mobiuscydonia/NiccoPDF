@@ -1,0 +1,9 @@
+# keep shell scripts LF so they run on macOS/Linux regardless of checkout OS
+*.sh text eol=lf
+*.command text eol=lf
+# Windows batch files need CRLF
+*.bat text eol=crlf
+# normalize the rest
+*.py text
+*.md text
+*.plist text eol=lf

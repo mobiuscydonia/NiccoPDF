@@ -1,10 +1,11 @@
-"""NiccoPDF — dead-simple PDF signer / text stamper for Windows.
+"""NiccoPDF — dead-simple PDF signer / text stamper (Windows + macOS).
 
 Open a PDF (or image), click to add text boxes, drop in a signature image
 (drag to move, corner-drag to resize), then Save As PDF.
 
 Usage:
-    pythonw app.py [file.pdf]
+    pythonw app.py [file.pdf]        (Windows)
+    python3 app.py [file.pdf]        (macOS / Linux)
     python  app.py --selftest <in.pdf> <out.pdf>   (headless smoke test)
 """
 from __future__ import annotations
@@ -19,9 +20,28 @@ import traceback
 
 APP_NAME = "NiccoPDF"
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
-CONF_DIR = os.path.join(os.environ.get("APPDATA", APP_DIR), APP_NAME)
+IS_WIN = sys.platform == "win32"
+IS_MAC = sys.platform == "darwin"
+
+if IS_WIN:
+    CONF_DIR = os.path.join(os.environ.get("APPDATA", APP_DIR), APP_NAME)
+elif IS_MAC:
+    CONF_DIR = os.path.expanduser(f"~/Library/Application Support/{APP_NAME}")
+else:
+    CONF_DIR = os.path.join(
+        os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config")),
+        APP_NAME)
 CONF_PATH = os.path.join(CONF_DIR, "config.json")
 LOG_PATH = os.path.join(CONF_DIR, "error.log")
+
+
+def _open_in_default_app(path: str) -> None:
+    if hasattr(os, "startfile"):
+        os.startfile(path)  # type: ignore[attr-defined]
+    else:
+        import subprocess
+        opener = "open" if IS_MAC else "xdg-open"
+        subprocess.Popen([opener, path])
 
 
 def _log(msg: str) -> None:
@@ -35,8 +55,19 @@ def _log(msg: str) -> None:
 
 def _fatal_box(title: str, msg: str) -> None:
     try:
-        import ctypes
-        ctypes.windll.user32.MessageBoxW(0, msg, title, 0x10)
+        if IS_WIN:
+            import ctypes
+            ctypes.windll.user32.MessageBoxW(0, msg, title, 0x10)
+        elif IS_MAC:
+            import json as _json
+            import subprocess
+            subprocess.run(
+                ["osascript", "-e",
+                 f"display dialog {_json.dumps(msg)} with title "
+                 f"{_json.dumps(title)} buttons {{\"OK\"}} default button 1"],
+                timeout=120, check=False)
+        else:
+            raise OSError("no native dialog")
     except Exception:
         print(f"{title}: {msg}", file=sys.stderr)
 
@@ -240,11 +271,19 @@ class App:
         self.canvas.bind("<ButtonRelease-1>", self.on_release)
         self.canvas.bind("<Double-Button-1>", self.on_double)
         self.canvas.bind("<Button-3>", self.on_right_click)
+        if IS_MAC:
+            # macOS: right button reports as Button-2 under Aqua Tk, and
+            # Control-click is the conventional context-menu gesture
+            self.canvas.bind("<Button-2>", self.on_right_click)
+            self.canvas.bind("<Control-Button-1>", self.on_right_click)
         self.canvas.bind("<MouseWheel>", self.on_wheel)
         self.canvas.bind("<Shift-MouseWheel>",
                          lambda e: self.canvas.xview_scroll(-1 if e.delta > 0 else 1, "units"))
         self.canvas.bind("<Control-MouseWheel>",
                          lambda e: self.cmd_zoom(1.1 if e.delta > 0 else 1 / 1.1))
+        if IS_MAC:
+            self.canvas.bind("<Command-MouseWheel>",
+                             lambda e: self.cmd_zoom(1.1 if e.delta > 0 else 1 / 1.1))
         self.canvas.bind("<Motion>", self.on_motion)
 
         self.status = tk.Label(self.root, text="Open a PDF to get started.",
@@ -263,6 +302,15 @@ class App:
         r.bind("<Control-plus>", lambda e: self.cmd_zoom(1.2))
         r.bind("<Control-equal>", lambda e: self.cmd_zoom(1.2))
         r.bind("<Control-minus>", lambda e: self.cmd_zoom(1 / 1.2))
+        if IS_MAC:
+            r.bind("<Command-o>", lambda e: self.cmd_open())
+            r.bind("<Command-s>", lambda e: self.cmd_save())
+            r.bind("<Command-z>", lambda e: self.cmd_undo(from_key=True))
+            r.bind("<Command-plus>", lambda e: self.cmd_zoom(1.2))
+            r.bind("<Command-equal>", lambda e: self.cmd_zoom(1.2))
+            r.bind("<Command-minus>", lambda e: self.cmd_zoom(1 / 1.2))
+            # Mac keyboards: the main "delete" key sends BackSpace in Tk
+            r.bind("<BackSpace>", lambda e: self.cmd_delete(from_key=True))
         for key, dx, dy in (("<Left>", -1, 0), ("<Right>", 1, 0),
                             ("<Up>", 0, -1), ("<Down>", 0, 1)):
             r.bind(key, lambda e, dx=dx, dy=dy: self.cmd_nudge(dx, dy, 1))
@@ -285,6 +333,19 @@ class App:
         if size_px not in self._font_cache:
             self._font_cache[size_px] = tkfont.Font(family="Arial", size=-size_px)
         return self._font_cache[size_px]
+
+    def _set_cursor(self, name: str) -> None:
+        """Set the canvas cursor, tolerating names a platform's Tk lacks."""
+        if getattr(self, "_cursor_now", None) == name:
+            return
+        self._cursor_now = name
+        try:
+            self.canvas.config(cursor=name)
+        except tk.TclError:
+            try:
+                self.canvas.config(cursor="")
+            except tk.TclError:
+                pass
 
     def _typing_elsewhere(self) -> bool:
         """True when keyboard focus is in an entry-like widget (so global
@@ -422,7 +483,7 @@ class App:
             msg += "\n\nNotes:\n• " + "\n• ".join(warnings)
         if messagebox.askyesno(APP_NAME, msg + "\n\nOpen it now?", parent=self.root):
             try:
-                os.startfile(out)
+                _open_in_default_app(out)
             except Exception as exc:
                 messagebox.showwarning(APP_NAME, f"Could not open the file:\n{exc}",
                                        parent=self.root)
@@ -446,7 +507,7 @@ class App:
             return
         self._commit_editor()
         self.mode = "text"
-        self.canvas.config(cursor="crosshair")
+        self._set_cursor("crosshair")
         self.set_status("Click on the page where the text should start.  (Esc cancels)")
 
     # ------------------------------------------------------------- images
@@ -494,7 +555,7 @@ class App:
         self.pending_image = {"png": png, "pil": pil, "w": w_px, "h": h_px,
                               "name": os.path.basename(path)}
         self.mode = "image"
-        self.canvas.config(cursor="crosshair")
+        self._set_cursor("crosshair")
         self.set_status(f"Click on the page to place “{os.path.basename(path)}”.  "
                         "(Esc cancels — drag corners afterwards to resize)")
 
@@ -517,7 +578,7 @@ class App:
         self.selected = len(self.overlays) - 1
         self.mode = "idle"
         self.pending_image = None
-        self.canvas.config(cursor="")
+        self._set_cursor("")
         self._mark_dirty()
         self.redraw()
         self.set_status("Drag to move; drag a corner to resize; Del deletes; Ctrl+Z undoes.")
@@ -621,7 +682,7 @@ class App:
         if self.mode != "idle":
             self.mode = "idle"
             self.pending_image = None
-            self.canvas.config(cursor="")
+            self._set_cursor("")
             self.set_status("Cancelled.")
         self.selected = None
         self.redraw()
@@ -819,7 +880,7 @@ class App:
 
         if self.mode == "text":
             self.mode = "idle"
-            self.canvas.config(cursor="")
+            self._set_cursor("")
             pw, ph = self.session.page_size(self.page)
             x_pt = min(max(x_pt, 0), pw - 5)
             y_pt = min(max(y_pt, 0), ph - 5)
@@ -972,11 +1033,11 @@ class App:
             return
         cx, cy = self._evt_canvas(e)
         if self._hit_handle(cx, cy):
-            self.canvas.config(cursor="sizing")
+            self._set_cursor("sizing")
         elif self._hit_overlay(cx, cy) is not None:
-            self.canvas.config(cursor="fleur")
+            self._set_cursor("fleur")
         else:
-            self.canvas.config(cursor="")
+            self._set_cursor("")
 
     # ------------------------------------------------------------- close
     def on_close(self) -> None:
@@ -1041,17 +1102,18 @@ def selftest(in_pdf: str, out_pdf: str) -> int:
 
 
 def main() -> None:
-    try:
-        import ctypes
+    if IS_WIN:
         try:
-            ctypes.windll.shcore.SetProcessDpiAwareness(2)
-        except Exception:
+            import ctypes
             try:
-                ctypes.windll.user32.SetProcessDPIAware()
+                ctypes.windll.shcore.SetProcessDpiAwareness(2)
             except Exception:
-                pass
-    except Exception:
-        pass
+                try:
+                    ctypes.windll.user32.SetProcessDPIAware()
+                except Exception:
+                    pass
+        except Exception:
+            pass
 
     args = sys.argv[1:]
     if args and args[0] == "--selftest":

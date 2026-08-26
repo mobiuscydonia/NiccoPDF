@@ -27,38 +27,86 @@ import pymupdf
 from PIL import Image, ImageChops, ImageDraw, ImageFont, ImageOps
 
 # ---------------------------------------------------------------------------
-# Fonts
+# Fonts (per platform)
 # ---------------------------------------------------------------------------
 
-_WIN_FONTS = os.path.join(os.environ.get("WINDIR", r"C:\Windows"), "Fonts")
-ARIAL_TTF = os.path.join(_WIN_FONTS, "arial.ttf")
-EMOJI_TTF = os.path.join(_WIN_FONTS, "seguiemj.ttf")   # Segoe UI Emoji
-CJK_TTC = os.path.join(_WIN_FONTS, "msyh.ttc")         # Microsoft YaHei
-SYMBOL_TTF = os.path.join(_WIN_FONTS, "seguisym.ttf")  # Segoe UI Symbol
+import sys as _sys
+
+_IS_WIN = _sys.platform == "win32"
+_IS_MAC = _sys.platform == "darwin"
+
+
+def _first_existing(paths) -> str | None:
+    for p in paths:
+        if p and os.path.exists(p):
+            return p
+    return None
+
+
+if _IS_WIN:
+    _WF = os.path.join(os.environ.get("WINDIR", r"C:\Windows"), "Fonts")
+    ARIAL_TTF = os.path.join(_WF, "arial.ttf")
+    EMOJI_TTF = os.path.join(_WF, "seguiemj.ttf")   # Segoe UI Emoji (color)
+    CJK_TTC = os.path.join(_WF, "msyh.ttc")         # Microsoft YaHei
+    SYMBOL_TTF = os.path.join(_WF, "seguisym.ttf")  # Segoe UI Symbol
+elif _IS_MAC:
+    ARIAL_TTF = _first_existing([
+        "/System/Library/Fonts/Supplemental/Arial.ttf",
+        "/Library/Fonts/Arial.ttf",
+        os.path.expanduser("~/Library/Fonts/Arial.ttf"),
+        "/System/Library/Fonts/Helvetica.ttc",
+    ])
+    # Apple Color Emoji uses fixed-size sbix strikes that Pillow cannot
+    # render at arbitrary sizes — emoji text routes through insert_htmlbox
+    # (clean monochrome glyphs) instead of the raster path on macOS.
+    EMOJI_TTF = None
+    CJK_TTC = _first_existing([
+        "/System/Library/Fonts/PingFang.ttc",
+        "/System/Library/Fonts/Hiragino Sans GB.ttc",
+        "/System/Library/Fonts/STHeiti Light.ttc",
+    ])
+    SYMBOL_TTF = _first_existing(["/System/Library/Fonts/Apple Symbols.ttf"])
+else:  # linux and friends
+    ARIAL_TTF = _first_existing([
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    ])
+    EMOJI_TTF = _first_existing([
+        "/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf"])
+    CJK_TTC = _first_existing([
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"])
+    SYMBOL_TTF = None
 
 _font_cache: dict[str, pymupdf.Font | None] = {}
 
 
-def _metric_font(path: str | None) -> pymupdf.Font | None:
-    """A pymupdf Font used for glyph-coverage queries and metrics."""
-    key = path or "<helv>"
-    if key not in _font_cache:
+def _helv_font() -> pymupdf.Font | None:
+    if "<helv>" not in _font_cache:
         try:
-            if path is None:
-                _font_cache[key] = pymupdf.Font("helv")
-            else:
-                _font_cache[key] = pymupdf.Font(fontfile=path) if os.path.exists(path) else None
+            _font_cache["<helv>"] = pymupdf.Font("helv")
         except Exception:
-            _font_cache[key] = None
-    return _font_cache[key]
+            _font_cache["<helv>"] = None
+    return _font_cache["<helv>"]
 
 
-def _primary_font() -> tuple[pymupdf.Font, str | None]:
+def _metric_font(path: str | None) -> pymupdf.Font | None:
+    """A pymupdf Font for glyph-coverage queries and metrics (None path -> None)."""
+    if path is None:
+        return None
+    if path not in _font_cache:
+        try:
+            _font_cache[path] = pymupdf.Font(fontfile=path) if os.path.exists(path) else None
+        except Exception:
+            _font_cache[path] = None
+    return _font_cache[path]
+
+
+def _primary_font() -> tuple[pymupdf.Font | None, str | None]:
     """(metric font, fontfile path or None-for-helv) for the main text font."""
     f = _metric_font(ARIAL_TTF)
     if f is not None:
         return f, ARIAL_TTF
-    return _metric_font(None), None
+    return _helv_font(), None
 
 
 _EMOJI_RANGES = (
@@ -151,11 +199,13 @@ def text_metrics(size: float) -> tuple[float, float]:
     try:
         asc, desc = f.ascender, f.descender
     except Exception:
-        asc, desc = 0.8, -0.2
-    if not (0.3 < asc < 1.5):
-        asc = 0.8
+        asc, desc = 0.9, -0.21
+    # sanity-clamp: some base fonts report bogus metrics (pymupdf's helv
+    # claims ascender 1.07, which sinks the baseline visibly)
+    if not (0.5 < asc <= 1.0):
+        asc = 0.9
     if not (-0.6 < desc < 0.05):
-        desc = -0.2
+        desc = -0.21
     return asc * size, (asc - desc) * size * 1.02
 
 
@@ -691,8 +741,12 @@ def _insert_text(page: pymupdf.Page, ov: TextOverlay, warnings: list[str]) -> No
     if _has_rtl(clean):
         # Story engine does proper bidi + shaping (emoji render monochrome).
         _insert_text_htmlbox(page, ov, warnings)
-    elif _has_emoji(clean):
+    elif _has_emoji(clean) and _metric_font(EMOJI_TTF) is not None:
         _insert_text_raster(page, ov, warnings)
+    elif _has_emoji(clean):
+        # no color-emoji-capable raster font on this platform (macOS):
+        # Story/htmlbox renders emoji as clean monochrome glyphs
+        _insert_text_htmlbox(page, ov, warnings)
     elif _is_latin1(clean):
         # base-14 Helvetica: metrically Arial-like and cleanly text-extractable
         _insert_text_vector(page, ov)
