@@ -2,6 +2,9 @@
 __pycache__/
 *.pyc
 
+# build output (release zips / app bundle)
+dist/
+
 # generated test corpus and outputs (rebuild with: python tests/make_corpus.py)
 tests/corpus/
 tests/out/
