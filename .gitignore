@@ -1,0 +1,10 @@
+# python
+__pycache__/
+*.pyc
+
+# generated test corpus and outputs (rebuild with: python tests/make_corpus.py)
+tests/corpus/
+tests/out/
+tests/out_fixes/
+tests/attacks/
+tests/pyw_probe.txt
