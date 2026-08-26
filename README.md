@@ -1,36 +1,59 @@
 # NiccoPDF
 
-A dead-simple Windows app for the one thing you actually need: **someone sends
-you a PDF, you put text on it, you sign it, you save it.**
+A dead-simple app for the one thing you actually need: **someone sends you a
+PDF, you put text on it, you sign it, you save it.** Works on Windows and
+macOS.
 
-## Launch
+## Download
 
-Double-click **`NiccoPDF.bat`** (or the **NiccoPDF** shortcut on your Desktop).
-You can also drag a PDF onto `NiccoPDF.bat` to open it directly.
+| | |
+|---|---|
+| 🪟 **Windows** | [**NiccoPDF-Windows.zip**](https://github.com/mobiuscydonia/NiccoPDF/releases/latest/download/NiccoPDF-Windows.zip) |
+| 🍎 **macOS** | [**NiccoPDF-macOS.zip**](https://github.com/mobiuscydonia/NiccoPDF/releases/latest/download/NiccoPDF-macOS.zip) |
+
+Both need Python 3 from [python.org](https://www.python.org/downloads/)
+(one-click install; on Windows tick *"Add python.exe to PATH"*). The app
+installs its own PDF components automatically the first time it runs.
+
+**Windows:** unzip, then double-click **`NiccoPDF.bat`** (you can also drag a
+PDF onto it).
+
+**macOS:** unzip, drag **`NiccoPDF.app`** wherever you like, then
+**right-click → Open** the first time. If macOS says it can't verify the app,
+go to *System Settings → Privacy & Security* and click **Open Anyway** — it's
+unsigned, not unsafe (or clear the flag in Terminal: `xattr -cr NiccoPDF.app`).
 
 ## Use
 
-1. **📂 Open** — pick the PDF (password-protected ones will ask for the password;
-   plain images like PNG/JPG scans also work).
+1. **📂 Open** — pick the PDF (password-protected ones will ask for the
+   password; plain images like PNG/JPG scans also work).
 2. **T Add Text** — click where the text goes, type, click away when done.
    Drag to move, drag the corner handle to resize, double-click to re-edit.
 3. **🖊 Signature** — first time it asks for your signature image (PNG/JPG),
    then remembers it forever; click to place, drag corners to resize.
    *White → transparent* removes the white paper background from scans.
 4. **💾 Save As PDF** — writes a new `…_signed.pdf`. Form fields are flattened
-   so it looks the same in every PDF viewer.
+   so it looks the same in every PDF viewer, and the app re-checks the saved
+   file to make sure your stamps really made it in.
 
-Shortcuts: `Ctrl+O` open · `Ctrl+S` save · `Ctrl+Z` undo · `Del` delete ·
-arrows nudge · `PgUp/PgDn` pages · `Ctrl+wheel` zoom · `Esc` cancel.
+Shortcuts (`Ctrl` on Windows, `Cmd` on Mac): `O` open · `S` save · `Z` undo ·
+`Delete`/`Backspace` delete · arrows nudge · `PgUp/PgDn` pages ·
+`Ctrl`+wheel zoom · `Esc` cancel.
 
-## Requirements
+## Running from source
 
-Python 3 with `pymupdf`, `pymupdf-fonts`, and `Pillow`
-(already installed on this machine):
+```
+pip install pymupdf pymupdf-fonts pillow
+python app.py            # any platform
+```
 
-    pip install pymupdf pymupdf-fonts pillow
+Windows keeps a `NiccoPDF.bat` launcher on the `main` branch; the `macos`
+branch adds the Mac launcher (`NiccoPDF.command`, plus `macos/build_app.py`
+which assembles the double-clickable `NiccoPDF.app` bundle and both release
+zips).
 
-Errors, if any, are logged to `%APPDATA%\NiccoPDF\error.log`.
+Errors, if any, are logged to `%APPDATA%\NiccoPDF\error.log` on Windows and
+`~/Library/Application Support/NiccoPDF/` on macOS.
 
 ## Development
 
